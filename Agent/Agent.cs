@@ -20,7 +20,7 @@ namespace IntelligentVacuum.Agent
             }
         }
         private Sensor sensor;
-        private Queue<GraphNode> explored=new Queue<GraphNode>();
+        private Stack<GraphNode> path=new Stack<GraphNode>();
         public Agent(Sensor sensor)
         {
            this.sensor=sensor;
@@ -29,24 +29,34 @@ namespace IntelligentVacuum.Agent
         public AgentAction DecideAction(Room room)
         {
             AgentAction curAction=AgentAction.NONE;
-            GraphNode curNode;
-            bool success=explored.TryDequeue(out curNode);
-            if (!success)
+            if (path.Count ==0)
             {
-               SetPath(room);
-               success=explored.TryDequeue(out curNode);
+               // if no path, get path for this room
+               GraphNode curNode=GetPath(room);
+               
+                   while (curNode != null)
+                   {
+                       path.Push(curNode);
+                       curNode=curNode.Parent;
+                   }
+                   if (path.Count > 0)
+                   {
+                       curAction=path.Pop().Action;
+                   }
             }   
-            if (success)
+            else
             {
-               curAction=curNode.Action;
+                curAction=path.Pop().Action;
             }
             return curAction;
         }
 
-        public void SetPath(Room room)
+        public GraphNode GetPath(Room room)
         {
         
+          GraphNode goalNode=null;
         // search for a goal node
+           HashSet<GraphNode> explored=new HashSet<GraphNode>(new roomComparer());
            Queue<GraphNode> frontier= new Queue<GraphNode>();
            GraphNode node=new GraphNode(room,null,AgentAction.NONE);
            frontier.Enqueue(node);
@@ -60,19 +70,21 @@ namespace IntelligentVacuum.Agent
                else
                {
                    List<GraphNode> newNodes=Explore(node);
-                   explored.Enqueue(node);
+                   explored.Add(node);
                 
                    foreach (GraphNode newNode in newNodes.Except(explored,new roomComparer())) // iterate over nodes except already explored
                    {
                       frontier.Enqueue(newNode);  //nodes to be explored
                    }
                }
-           } while (!node.Room.IsDirty && !empty);  //dirty room is goal or empty if no dirty rooms
+           } while (!empty && !node.Room.IsDirty);  //dirty room is goal or empty if no dirty rooms
 
-           if (empty)
+           if (!empty) // dirty room
            {
-              explored.Clear();
+             // add a node on the end for cleaning
+              goalNode=new GraphNode(node.Room, node, AgentAction.CLEAN);
            }
+           return goalNode;
         }
 
         private List<GraphNode> Explore(GraphNode node)
@@ -109,17 +121,15 @@ namespace IntelligentVacuum.Agent
                    xydir=Tuple.Create(-1,0);
                    break;
             }
-
             if (xydir != null)
             {
-                 Room newRoom=sensor.SenseRoom(node.Room.XAxis+xydir.Item1, node.Room.YAxis+xydir.Item2);
-                   if (!newRoom.IsLocked) // don't include obstacles
-                   {
-                      if (newRoom.IsDirty)  
-                         newNode=new GraphNode(newRoom,node,AgentAction.CLEAN);
-                      else
-                          newNode=new GraphNode(newRoom,node, action);
-                   }
+            Room newRoom=sensor.SenseRoom(node.Room.XAxis+xydir.Item1, node.Room.YAxis+xydir.Item2);
+            
+            if (newRoom != null && !newRoom.IsLocked) //don't incude obstacles
+            {
+ 
+                newNode=new GraphNode(newRoom,node, action);
+            }
             }
             return newNode;
         }
